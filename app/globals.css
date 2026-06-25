@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+body {
+  background: linear-gradient(135deg, #fff0f7 0%, #fdf4ff 50%, #fff5f9 100%);
+  min-height: 100vh;
+  @apply text-gray-900 antialiased;
+}
+
+.accent { color: #e91e8c; }
+.bg-accent { background-color: #e91e8c; }
+.border-accent { border-color: #e91e8c; }
+
+.card-gradient {
+  background: linear-gradient(135deg, #e91e8c 0%, #be185d 100%);
+}
+
+.sidebar-glow {
+  box-shadow: 4px 0 24px rgba(233, 30, 140, 0.1);
+}
