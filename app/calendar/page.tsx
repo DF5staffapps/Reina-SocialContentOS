@@ -1,11 +1,11 @@
 'use client'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
-import type { ContentWeek, Post } from '@/types/database'
+import type { Brand, ContentWeek, Post } from '@/types/database'
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const PLATFORMS = ['linkedin', 'facebook', 'instagram', 'twitter', 'tiktok', 'youtube']
-const STATUSES = ['idea', 'drafted', 'designed', 'scheduled', 'posted'] as const
+const STATUSES = ['planning', 'for_review', 'approved', 'published'] as const
 type PostStatus = typeof STATUSES[number]
 
 const PLATFORM_COLOR: Record<string, { bg: string; text: string; bar: string }> = {
@@ -18,11 +18,10 @@ const PLATFORM_COLOR: Record<string, { bg: string; text: string; bar: string }> 
 }
 
 const STATUS_CONFIG: Record<PostStatus, { label: string; color: string; dot: string }> = {
-  idea:      { label: 'Idea',      color: 'bg-gray-100 text-gray-600',       dot: 'bg-gray-400'   },
-  drafted:   { label: 'Drafted',   color: 'bg-blue-100 text-blue-700',       dot: 'bg-blue-500'   },
-  designed:  { label: 'Designed',  color: 'bg-purple-100 text-purple-700',   dot: 'bg-purple-500' },
-  scheduled: { label: 'Scheduled', color: 'bg-amber-100 text-amber-700',     dot: 'bg-amber-500'  },
-  posted:    { label: 'Posted',    color: 'bg-green-100 text-green-700',     dot: 'bg-green-500'  },
+  planning:   { label: 'Planning',   color: 'bg-gray-100 text-gray-600',     dot: 'bg-gray-400'   },
+  for_review: { label: 'For Review', color: 'bg-blue-100 text-blue-700',     dot: 'bg-blue-500'   },
+  approved:   { label: 'Approved',   color: 'bg-amber-100 text-amber-700',   dot: 'bg-amber-500'  },
+  published:  { label: 'Published',  color: 'bg-green-100 text-green-700',   dot: 'bg-green-500'  },
 }
 
 function toYMD(d: Date) { return d.toISOString().split('T')[0] }
@@ -58,6 +57,7 @@ function RecordModal({
   date,
   pillars,
   saveStatus,
+  ghlStatus,
   onClose,
   onChange,
   onDelete,
@@ -66,13 +66,15 @@ function RecordModal({
   date: Date
   pillars: string[]
   saveStatus: 'idle' | 'saving' | 'saved'
+  ghlStatus: 'idle' | 'sending' | 'sent' | 'error'
   onClose: () => void
   onChange: (patch: Partial<Post>) => void
   onDelete: () => void
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const pc = PLATFORM_COLOR[post.platform ?? ''] ?? PLATFORM_COLOR.linkedin
-  const sc = STATUS_CONFIG[post.status as PostStatus] ?? STATUS_CONFIG.idea
+  const platforms = post.platform ?? ['linkedin']
+  const pc = PLATFORM_COLOR[platforms[0]] ?? PLATFORM_COLOR.linkedin
+  const sc = STATUS_CONFIG[post.status as PostStatus] ?? STATUS_CONFIG.planning
   const dateLabel = date.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 
   // close on backdrop click
@@ -92,14 +94,31 @@ function RecordModal({
 
         {/* Header */}
         <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100">
-          <div className="flex items-center gap-2">
-            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${pc.bg} ${pc.text}`}>
-              {platformLabel(post.platform ?? 'linkedin')}
-            </span>
+          <div className="flex items-center gap-2 flex-wrap">
+            {platforms.map(p => {
+              const c = PLATFORM_COLOR[p] ?? PLATFORM_COLOR.linkedin
+              return (
+                <span key={p} className={`text-xs font-semibold px-2.5 py-1 rounded-full ${c.bg} ${c.text}`}>
+                  {platformLabel(p)}
+                </span>
+              )
+            })}
             <span className={`text-xs font-semibold px-2.5 py-1 rounded-full flex items-center gap-1.5 ${sc.color}`}>
               <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`} />
               {sc.label}
             </span>
+            {post.ghl_post_id && (
+              <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 flex items-center gap-1">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                On GHL
+              </span>
+            )}
+            {ghlStatus === 'sending' && (
+              <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-amber-50 text-amber-600">Scheduling…</span>
+            )}
+            {ghlStatus === 'error' && (
+              <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-red-50 text-red-600">GHL failed</span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {confirmDelete ? (
@@ -158,13 +177,28 @@ function RecordModal({
           {/* Platform + Status */}
           <div className="grid grid-cols-2 gap-4">
             <Field label="Social Media Channel">
-              <select
-                value={post.platform ?? 'linkedin'}
-                onChange={e => onChange({ platform: e.target.value })}
-                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-pink-200 focus:border-[#e91e8c] bg-white"
-              >
-                {PLATFORMS.map(p => <option key={p} value={p}>{platformLabel(p)}</option>)}
-              </select>
+              <div className="flex flex-wrap gap-1.5">
+                {PLATFORMS.map(p => {
+                  const selected = (post.platform ?? []).includes(p)
+                  const c = PLATFORM_COLOR[p] ?? PLATFORM_COLOR.linkedin
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => {
+                        const current = post.platform ?? []
+                        const updated = selected ? current.filter(x => x !== p) : [...current, p]
+                        onChange({ platform: updated.length > 0 ? updated : null })
+                      }}
+                      className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                        selected ? `${c.bg} ${c.text} border-transparent` : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      {platformLabel(p)}
+                    </button>
+                  )
+                })}
+              </div>
             </Field>
             <Field label="Status">
               <select
@@ -392,14 +426,15 @@ function DayPopover({
           </div>
         ) : (
           posts.map(post => {
-            const pc = PLATFORM_COLOR[post.platform ?? ''] ?? PLATFORM_COLOR.linkedin
-            const sc = STATUS_CONFIG[post.status as PostStatus] ?? STATUS_CONFIG.idea
+            const postPlatforms = post.platform ?? ['linkedin']
+            const pc = PLATFORM_COLOR[postPlatforms[0]] ?? PLATFORM_COLOR.linkedin
+            const sc = STATUS_CONFIG[post.status as PostStatus] ?? STATUS_CONFIG.planning
             return (
               <div key={post.id} className="flex items-start gap-2 px-3 py-2.5 hover:bg-gray-50 group transition-colors">
                 <div className={`w-1 rounded-full mt-0.5 shrink-0 self-stretch min-h-[1rem] ${pc.bar}`} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 mb-0.5">
-                    <span className={`text-[10px] font-semibold ${pc.text}`}>{platformLabel(post.platform ?? '')}</span>
+                    <span className={`text-[10px] font-semibold ${pc.text}`}>{postPlatforms.map(platformLabel).join(', ')}</span>
                     {post.post_time && <span className="text-[10px] text-gray-400">{post.post_time}</span>}
                   </div>
                   <p className="text-xs text-gray-700 line-clamp-2 leading-relaxed">{post.concept || '(no concept)'}</p>
@@ -442,10 +477,11 @@ function DayPopover({
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function CalendarPage() {
   const now = new Date()
-  const [brandId, setBrandId]     = useState('')
-  const [pillars, setPillars]     = useState<string[]>([])
-  const [viewYear, setViewYear]   = useState(now.getFullYear())
-  const [viewMonth, setViewMonth] = useState(now.getMonth())
+  const [brandId, setBrandId]         = useState('')
+  const [pillars, setPillars]         = useState<string[]>([])
+  const [brandGHL, setBrandGHL]       = useState<Pick<Brand, 'ghl_location_id' | 'ghl_api_key' | 'ghl_accounts'> | null>(null)
+  const [viewYear, setViewYear]       = useState(now.getFullYear())
+  const [viewMonth, setViewMonth]     = useState(now.getMonth())
 
   const [weeks, setWeeks]   = useState<ContentWeek[]>([])
   const [posts, setPosts]   = useState<Post[]>([])
@@ -461,6 +497,7 @@ export default function CalendarPage() {
   const [modalPost, setModalPost]     = useState<Post | null>(null)
   const [modalDate, setModalDate]     = useState<Date | null>(null)
   const [saveStatus, setSaveStatus]   = useState<'idle' | 'saving' | 'saved'>('idle')
+  const [ghlStatus, setGhlStatus]     = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   // Debounce save
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -475,9 +512,21 @@ export default function CalendarPage() {
 
   useEffect(() => {
     if (!brandId) return
-    supabase.from('brands').select('pillars').eq('id', brandId).single()
-      .then(({ data }) => setPillars(data?.pillars?.map((p: { name: string }) => p.name) ?? []))
+    supabase.from('brands').select('pillars, ghl_location_id, ghl_api_key, ghl_accounts').eq('id', brandId).single()
+      .then(({ data }) => {
+        setPillars(data?.pillars?.map((p: { name: string }) => p.name) ?? [])
+        setBrandGHL(data ? { ghl_location_id: data.ghl_location_id, ghl_api_key: data.ghl_api_key, ghl_accounts: data.ghl_accounts } : null)
+      })
   }, [brandId])
+
+  function normalizePosts(raw: Post[]): Post[] {
+    return raw.map(p => ({
+      ...p,
+      platform: p.platform == null ? null
+        : Array.isArray(p.platform) ? p.platform
+        : [p.platform as unknown as string],
+    }))
+  }
 
   const loadMonth = useCallback(async () => {
     if (!brandId) return
@@ -491,7 +540,7 @@ export default function CalendarPage() {
     if (foundWeeks.length > 0) {
       const { data: postsData } = await supabase
         .from('posts').select('*').in('content_week_id', foundWeeks.map(w => w.id)).order('day_of_week')
-      setPosts(postsData ?? [])
+      setPosts(normalizePosts(postsData ?? []))
     } else {
       setPosts([])
     }
@@ -535,14 +584,15 @@ export default function CalendarPage() {
       content_week_id: week.id,
       brand_id: brandId,
       day_of_week: isoDay(d),
-      platform: 'linkedin',
-      status: 'idea',
+      platform: ['linkedin'],
+      status: 'planning',
       concept: '',
     }).select().single()
     if (data) {
-      setPosts(prev => [...prev, data])
+      const normalized = normalizePosts([data])[0]
+      setPosts(prev => [...prev, normalized])
       setPopoverDay(null)
-      setModalPost(data)
+      setModalPost(normalized)
       setModalDate(d)
     }
   }
@@ -551,6 +601,7 @@ export default function CalendarPage() {
     setPopoverDay(null)
     setModalPost(post)
     setModalDate(date)
+    setGhlStatus('idle')
   }
 
   function handleModalChange(patch: Partial<Post>) {
@@ -566,6 +617,46 @@ export default function CalendarPage() {
       await supabase.from('posts').update(patch).eq('id', updated.id)
       setSaveStatus('saved')
       setTimeout(() => setSaveStatus('idle'), 2000)
+
+      // Auto-schedule to GHL when status flips to approved
+      if (patch.status === 'approved' && !updated.ghl_post_id && brandGHL?.ghl_location_id && brandGHL?.ghl_api_key) {
+        const mapping = brandGHL.ghl_accounts?.mapping ?? {}
+        const accountIds = (updated.platform ?? []).map(p => mapping[p]).filter(Boolean)
+        if (accountIds.length > 0) {
+          setGhlStatus('sending')
+          try {
+            const caption = [updated.caption, updated.hashtags].filter(Boolean).join('\n\n')
+            const scheduledAt = updated.scheduled_date && updated.post_time
+              ? new Date(`${updated.scheduled_date}T${updated.post_time}`).toISOString()
+              : null
+            const res = await fetch('/api/ghl', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                action: 'publish_post',
+                locationId: brandGHL.ghl_location_id,
+                apiKey: brandGHL.ghl_api_key,
+                accountIds,
+                summary: caption || updated.concept || '',
+                mediaUrl: updated.media_url || null,
+                scheduledAt,
+              }),
+            })
+            const data = await res.json()
+            if (!res.ok || data.error) throw new Error(data.error ?? `HTTP ${res.status}`)
+            const ghlPostId = data.postId ?? null
+            await supabase.from('posts').update({ ghl_post_id: ghlPostId }).eq('id', updated.id)
+            const withGhl = { ...updated, ghl_post_id: ghlPostId }
+            setModalPost(withGhl)
+            setPosts(prev => prev.map(p => p.id === updated.id ? withGhl : p))
+            setGhlStatus('sent')
+            setTimeout(() => setGhlStatus('idle'), 3000)
+          } catch {
+            setGhlStatus('error')
+            setTimeout(() => setGhlStatus('idle'), 5000)
+          }
+        }
+      }
     }, 600)
   }
 
@@ -657,13 +748,17 @@ export default function CalendarPage() {
                 {/* Post chips */}
                 <div className="space-y-0.5">
                   {dayPosts.slice(0, 3).map(post => {
-                    const pc = PLATFORM_COLOR[post.platform ?? ''] ?? PLATFORM_COLOR.linkedin
+                    const cellPlatforms = post.platform ?? ['linkedin']
+                    const pc = PLATFORM_COLOR[cellPlatforms[0]] ?? PLATFORM_COLOR.linkedin
                     return (
                       <div key={post.id} className={`flex items-center gap-1.5 rounded-md pl-1.5 pr-1 py-0.5 ${pc.bg} border border-transparent`}>
                         <span className={`w-1 h-1 rounded-full shrink-0 ${pc.bar}`} />
                         <span className={`text-[10px] font-medium truncate leading-tight ${pc.text}`}>
-                          {post.concept || platformLabel(post.platform ?? '')}
+                          {post.concept || cellPlatforms.map(platformLabel).join(', ')}
                         </span>
+                        {post.ghl_post_id && (
+                          <span className="ml-auto shrink-0 w-1.5 h-1.5 rounded-full bg-emerald-500" title="Scheduled on GHL" />
+                        )}
                       </div>
                     )
                   })}
@@ -700,7 +795,8 @@ export default function CalendarPage() {
           date={modalDate}
           pillars={pillars}
           saveStatus={saveStatus}
-          onClose={() => { setModalPost(null); setModalDate(null); setSaveStatus('idle') }}
+          ghlStatus={ghlStatus}
+          onClose={() => { setModalPost(null); setModalDate(null); setSaveStatus('idle'); setGhlStatus('idle') }}
           onChange={handleModalChange}
           onDelete={() => deletePost(modalPost.id)}
         />

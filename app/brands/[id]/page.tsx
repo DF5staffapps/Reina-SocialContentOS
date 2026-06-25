@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 type Pillar = { name: string; description: string }
 type Offer = { name: string; description: string }
 type BrandColor = { name: string; hex: string }
+type GHLAccount = { id: string; name: string; type: string }
 
 // Extract audio from a video file, downsample to 16kHz mono WAV for Whisper
 async function extractAudioAsWav(file: File): Promise<Blob> {
@@ -134,10 +135,19 @@ export default function BrandEditPage() {
   const [newVocabUse, setNewVocabUse] = useState('')
   const [newVocabAvoid, setNewVocabAvoid] = useState('')
 
+  // GHL integration
+  const [ghlLocationId, setGhlLocationId] = useState('')
+  const [ghlApiKey, setGhlApiKey] = useState('')
+  const [ghlFetchedAccounts, setGhlFetchedAccounts] = useState<GHLAccount[]>([])
+  const [ghlMapping, setGhlMapping] = useState<Record<string, string>>({})
+  const [ghlTesting, setGhlTesting] = useState(false)
+  const [ghlStatus, setGhlStatus] = useState<'idle' | 'connected' | 'error'>('idle')
+  const [ghlError, setGhlError] = useState('')
+
   // Keep latest state in refs so auto-save always uses fresh values
-  const stateRef = useRef({ name, colors, icpRaw, icpPdfName, voiceTone, pillars, offers, platforms, brandVoice })
+  const stateRef = useRef({ name, colors, icpRaw, icpPdfName, voiceTone, pillars, offers, platforms, brandVoice, ghlLocationId, ghlApiKey, ghlFetchedAccounts, ghlMapping })
   useEffect(() => {
-    stateRef.current = { name, colors, icpRaw, icpPdfName, voiceTone, pillars, offers, platforms, brandVoice }
+    stateRef.current = { name, colors, icpRaw, icpPdfName, voiceTone, pillars, offers, platforms, brandVoice, ghlLocationId, ghlApiKey, ghlFetchedAccounts, ghlMapping }
   })
 
   // Load brand from DB
@@ -173,6 +183,13 @@ export default function BrandEditPage() {
           video_transcript: data.brand_voice.video_transcript ?? '',
         })
       }
+      setGhlLocationId(data.ghl_location_id ?? '')
+      setGhlApiKey(data.ghl_api_key ?? '')
+      if (data.ghl_accounts) {
+        setGhlFetchedAccounts(data.ghl_accounts.accounts ?? [])
+        setGhlMapping(data.ghl_accounts.mapping ?? {})
+        if ((data.ghl_accounts.accounts ?? []).length > 0) setGhlStatus('connected')
+      }
       setLoading(false)
     })
   }, [id])
@@ -194,6 +211,11 @@ export default function BrandEditPage() {
         offers: s.offers,
         platforms: s.platforms,
         brand_voice: s.brandVoice,
+        ghl_location_id: s.ghlLocationId || null,
+        ghl_api_key: s.ghlApiKey || null,
+        ghl_accounts: s.ghlFetchedAccounts.length > 0
+          ? { accounts: s.ghlFetchedAccounts, mapping: s.ghlMapping }
+          : null,
       }).eq('id', id)
       setIsDirty(false)
       setSaved(true)
@@ -201,7 +223,7 @@ export default function BrandEditPage() {
     }, 2000)
     return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name, colors, icpRaw, icpPdfName, voiceTone, pillars, offers, platforms, brandVoice, loading])
+  }, [name, colors, icpRaw, icpPdfName, voiceTone, pillars, offers, platforms, brandVoice, ghlLocationId, ghlApiKey, ghlFetchedAccounts, ghlMapping, loading])
 
   // Warn on browser refresh/close if mid-type (before debounce fires)
   useEffect(() => {
@@ -225,6 +247,11 @@ export default function BrandEditPage() {
       offers,
       platforms,
       brand_voice: brandVoice,
+      ghl_location_id: ghlLocationId || null,
+      ghl_api_key: ghlApiKey || null,
+      ghl_accounts: ghlFetchedAccounts.length > 0
+        ? { accounts: ghlFetchedAccounts, mapping: ghlMapping }
+        : null,
     }).eq('id', id)
     setSaving(false)
     if (error) {
@@ -751,6 +778,96 @@ export default function BrandEditPage() {
               </label>
             ))}
           </div>
+        </div>
+
+        {/* GoHighLevel Integration */}
+        <div className="border-t border-gray-100 pt-6 space-y-4">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">GoHighLevel Integration</h3>
+            <p className="text-xs text-gray-400 mt-0.5">Connect your GHL location to auto-schedule posts when you mark them as Scheduled.</p>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">GHL Location ID</label>
+              <input
+                value={ghlLocationId}
+                onChange={e => setGhlLocationId(e.target.value)}
+                placeholder="e.g. ABC123xyz…"
+                className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-[#e91e8c]"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">GHL API Key</label>
+              <input
+                type="password"
+                value={ghlApiKey}
+                onChange={e => setGhlApiKey(e.target.value)}
+                placeholder="eyJ…"
+                className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-[#e91e8c]"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              disabled={ghlTesting || !ghlLocationId.trim() || !ghlApiKey.trim()}
+              onClick={async () => {
+                setGhlTesting(true)
+                setGhlStatus('idle')
+                setGhlError('')
+                try {
+                  const res = await fetch('/api/ghl', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'fetch_accounts', locationId: ghlLocationId.trim(), apiKey: ghlApiKey.trim() }),
+                  })
+                  const data = await res.json()
+                  if (!res.ok || data.error) throw new Error(data.error ?? `HTTP ${res.status}`)
+                  setGhlFetchedAccounts(data.accounts ?? [])
+                  setGhlStatus('connected')
+                } catch (err) {
+                  setGhlError(err instanceof Error ? err.message : String(err))
+                  setGhlStatus('error')
+                } finally {
+                  setGhlTesting(false)
+                }
+              }}
+              className="px-4 py-2 border border-gray-200 rounded-md text-sm text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              {ghlTesting ? 'Connecting…' : 'Test Connection & Fetch Accounts'}
+            </button>
+            {ghlStatus === 'connected' && (
+              <span className="text-xs text-green-600 font-medium">Connected — {ghlFetchedAccounts.length} account{ghlFetchedAccounts.length !== 1 ? 's' : ''} found</span>
+            )}
+            {ghlStatus === 'error' && (
+              <span className="text-xs text-red-500">{ghlError}</span>
+            )}
+          </div>
+
+          {ghlFetchedAccounts.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-gray-600 mb-2">Map your platforms to GHL accounts:</p>
+              <div className="space-y-2">
+                {platforms.map(platform => (
+                  <div key={platform} className="flex items-center gap-3">
+                    <span className="w-24 text-sm text-gray-700 capitalize shrink-0">{platform}</span>
+                    <select
+                      value={ghlMapping[platform] ?? ''}
+                      onChange={e => setGhlMapping(prev => ({ ...prev, [platform]: e.target.value }))}
+                      className="flex-1 border border-gray-200 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#e91e8c] bg-white"
+                    >
+                      <option value="">— not mapped —</option>
+                      {ghlFetchedAccounts.map(acc => (
+                        <option key={acc.id} value={acc.id}>{acc.name} ({acc.type})</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-gray-400 mt-2">Mapping is saved automatically with the rest of the brand settings.</p>
+            </div>
+          )}
         </div>
 
         {/* Save */}

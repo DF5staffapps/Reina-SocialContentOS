@@ -533,14 +533,14 @@ Offer: ${campaign.offer_description ?? 'not provided'}`
         content_week_id: weekId,
         brand_id: brand.id,
         day_of_week: post.day_of_week,
-        platform: post.platform,
+        platform: post.platform ? [post.platform] : null,
         pillar: post.pillar || null,
         concept: post.concept,
         caption: post.editedCaption || post.caption || null,
         hashtags: post.hashtags || null,
         cta_url: post.cta_url || null,
         media_url: graphicUrls[idx] || null,
-        status: 'idea',
+        status: 'planning',
         scheduled_date: post.date,
       }
     }).filter(Boolean)

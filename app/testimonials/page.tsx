@@ -13,6 +13,7 @@ type Testimonial = {
   content: string | null
   file_path: string | null
   file_url: string | null
+  graphic_url: string | null
   rating: number | null
   last_used_at: string | null
   times_used: number
@@ -44,6 +45,171 @@ const SOURCE_COLOR: Record<SourceType, { bg: string; color: string }> = {
   text:  { bg: 'rgba(99,102,241,0.10)',  color: '#4338ca' },
   image: { bg: 'rgba(16,185,129,0.10)',  color: '#047857' },
   pdf:   { bg: 'rgba(239,68,68,0.10)',   color: '#b91c1c' },
+}
+
+// ─── Canvas testimonial graphic renderer ──────────────────────────────────────
+
+/** Measure how many lines a wrapped text block will take, return line count */
+function measureLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  const words = text.split(' ')
+  const lines: string[] = []
+  let line = ''
+  for (const word of words) {
+    const test = line ? line + ' ' + word : word
+    if (ctx.measureText(test).width > maxWidth && line) {
+      lines.push(line)
+      line = word
+    } else {
+      line = test
+    }
+  }
+  if (line) lines.push(line)
+  return lines
+}
+
+function buildTestimonialGraphic(
+  content: string | null,
+  authorName: string | null,
+  authorTitle: string | null,
+  rating: number | null,
+  brandName: string,
+  primary: string,
+  accent: string,
+): string {
+  const S = 1080
+  const canvas = document.createElement('canvas')
+  canvas.width = S; canvas.height = S
+  const ctx = canvas.getContext('2d')!
+
+  const cx = S / 2  // horizontal center
+
+  // ── Background: brand color gradient ─────────────────────────────────────
+  const bg = ctx.createLinearGradient(0, 0, S, S)
+  bg.addColorStop(0, primary)
+  bg.addColorStop(1, accent && accent !== primary ? accent : shiftColor(primary, -30))
+  ctx.fillStyle = bg
+  ctx.fillRect(0, 0, S, S)
+
+  // ── Decorative circles (corner accents) ──────────────────────────────────
+  ctx.save()
+  ctx.globalAlpha = 0.12
+  ctx.fillStyle = '#ffffff'
+  ctx.beginPath(); ctx.arc(-60, -60, 280, 0, Math.PI * 2); ctx.fill()
+  ctx.beginPath(); ctx.arc(S + 60, S + 60, 280, 0, Math.PI * 2); ctx.fill()
+  ctx.globalAlpha = 0.07
+  ctx.beginPath(); ctx.arc(S + 20, 120, 160, 0, Math.PI * 2); ctx.fill()
+  ctx.beginPath(); ctx.arc(80, S - 60, 140, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
+
+  // ── Large decorative opening quote mark ──────────────────────────────────
+  ctx.save()
+  ctx.fillStyle = '#ffffff'
+  ctx.globalAlpha = 0.15
+  ctx.font = `bold 420px Georgia, 'Times New Roman', serif`
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'top'
+  ctx.fillText('\u201C', 48, -40)
+  ctx.restore()
+
+  // ── Measure content to calculate total block height for vertical centering ─
+  const textMaxW = S - 200
+  const quoteRaw = content ? content.slice(0, 380) + (content.length > 380 ? '\u2026' : '') : ''
+
+  // Auto font size: fit quote in max 8 lines
+  let fontSize = 52
+  let quoteLines: string[] = []
+  for (let fs = 52; fs >= 30; fs -= 2) {
+    ctx.font = `400 ${fs}px Georgia, 'Times New Roman', serif`
+    const lines = measureLines(ctx, quoteRaw, textMaxW)
+    if (lines.length <= 8) { fontSize = fs; quoteLines = lines; break }
+    quoteLines = lines
+  }
+  const lineH = fontSize * 1.6
+
+  const starSize   = rating ? 56 : 0
+  const starGap    = rating ? 20 : 0
+  const divH       = 3
+  const divGap     = 28
+  const authorSize = authorName ? 40 : 0
+  const authorGap  = authorName ? 12 : 0
+  const titleSize  = authorTitle ? 30 : 0
+
+  const totalH = (quoteLines.length * lineH)
+    + (rating ? starGap + starSize : 0)
+    + divGap + divH + divGap
+    + (authorName ? authorSize + authorGap : 0)
+    + (authorTitle ? titleSize : 0)
+
+  // Reserve 80px at bottom for brand name
+  const availH = S - 80
+  let curY = (availH - totalH) / 2 + fontSize  // baseline of first line
+
+  // ── Quote text ────────────────────────────────────────────────────────────
+  ctx.fillStyle = '#ffffff'
+  ctx.font = `400 ${fontSize}px Georgia, 'Times New Roman', serif`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'alphabetic'
+  for (const line of quoteLines) {
+    ctx.fillText(line, cx, curY)
+    curY += lineH
+  }
+  curY -= lineH - fontSize  // remove trailing gap
+
+  // ── Stars ─────────────────────────────────────────────────────────────────
+  if (rating && rating > 0) {
+    curY += starGap
+    ctx.font = `${starSize}px serif`
+    ctx.textAlign = 'center'
+    // Filled stars in gold, empty in white/30%
+    const starStr = '★'.repeat(rating) + '☆'.repeat(5 - rating)
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'
+    ctx.fillText(starStr, cx, curY + starSize * 0.85)
+    ctx.fillStyle = '#fbbf24'
+    ctx.fillText('★'.repeat(rating), cx - ctx.measureText(starStr).width / 2 + ctx.measureText('★'.repeat(rating)).width / 2, curY + starSize * 0.85)
+    curY += starSize
+  }
+
+  // ── Divider ───────────────────────────────────────────────────────────────
+  curY += divGap
+  ctx.fillStyle = 'rgba(255,255,255,0.40)'
+  ctx.fillRect(cx - 48, curY, 96, divH)
+  curY += divH + divGap
+
+  // ── Author name ───────────────────────────────────────────────────────────
+  if (authorName) {
+    ctx.fillStyle = '#ffffff'
+    ctx.font = `700 ${authorSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`
+    ctx.textAlign = 'center'
+    ctx.fillText(authorName, cx, curY)
+    curY += authorSize + authorGap
+  }
+
+  // ── Author title ──────────────────────────────────────────────────────────
+  if (authorTitle) {
+    ctx.fillStyle = 'rgba(255,255,255,0.70)'
+    ctx.font = `400 ${titleSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`
+    ctx.textAlign = 'center'
+    ctx.fillText(authorTitle, cx, curY)
+  }
+
+  // ── Brand name at bottom ──────────────────────────────────────────────────
+  if (brandName) {
+    ctx.fillStyle = 'rgba(255,255,255,0.50)'
+    ctx.font = `600 26px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`
+    ctx.textAlign = 'center'
+    ctx.fillText(brandName.toUpperCase(), cx, S - 32)
+  }
+
+  return canvas.toDataURL('image/png')
+}
+
+/** Darken or lighten a hex color by an amount (-255 to 255) */
+function shiftColor(hex: string, amount: number): string {
+  const n = parseInt(hex.replace('#', ''), 16)
+  const r = Math.min(255, Math.max(0, (n >> 16) + amount))
+  const g = Math.min(255, Math.max(0, ((n >> 8) & 0xff) + amount))
+  const b = Math.min(255, Math.max(0, (n & 0xff) + amount))
+  return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`
 }
 
 function CampaignTags({ campaigns, selected, onChange }: {
@@ -134,6 +300,7 @@ async function dataUrlToFile(dataUrl: string, filename: string): Promise<File> {
 export default function TestimonialsPage() {
   const [brandId, setBrandId] = useState<string | null>(null)
   const [brandName, setBrandName] = useState('')
+  const [brandColors, setBrandColors] = useState<{ primary?: string; accent?: string } | null>(null)
   const [testimonials, setTestimonials] = useState<Testimonial[]>([])
   const [templates, setTemplates] = useState<Template[]>([])
   const [loading, setLoading] = useState(true)
@@ -189,7 +356,22 @@ export default function TestimonialsPage() {
     const id = localStorage.getItem('selectedBrandId')
     if (!id) { setLoading(false); return }
     setBrandId(id)
-    supabase.from('brands').select('name').eq('id', id).single().then(({ data }) => { if (data) setBrandName(data.name) })
+    supabase.from('brands').select('name, brand_colors').eq('id', id).single().then(({ data }) => {
+      if (!data) return
+      setBrandName(data.name)
+      // Support both new format { colors: [{name, hex}] } and old { primary, accent }
+      const bc = data.brand_colors
+      const colorsArr: { name: string; hex: string }[] = bc?.colors ?? []
+      const primary = colorsArr.find((c: { name: string }) => c.name?.toLowerCase().includes('primary'))?.hex
+        ?? colorsArr[0]?.hex
+        ?? bc?.primary
+        ?? null
+      const accent = colorsArr.find((c: { name: string }) => c.name?.toLowerCase().includes('accent'))?.hex
+        ?? colorsArr[1]?.hex
+        ?? bc?.accent
+        ?? null
+      setBrandColors(primary ? { primary, accent: accent ?? primary } : null)
+    })
     supabase.from('campaigns').select('id, name').eq('brand_id', id).order('created_at', { ascending: false })
       .then(({ data }) => { if (data) setCampaigns(data) })
     load(id)
@@ -382,62 +564,75 @@ export default function TestimonialsPage() {
     const uuid = crypto.randomUUID()
     const ext = file.name.split('.').pop() ?? 'jpg'
     const filePath = `${brandId}/templates/${uuid}.${ext}`
-    const { error } = await supabase.storage.from('brand-assets').upload(filePath, file, { contentType: file.type })
-    if (!error) {
-      const { data: { publicUrl } } = supabase.storage.from('brand-assets').getPublicUrl(filePath)
 
-      // Analyze visual style for use as DALL-E reference
-      let description: string | null = null
-      let style_tags: string[] | null = null
-      try {
-        const res = await fetch('/api/chat', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: [], mode: 'analyze-style', imageDataUrl: dataUrl,
-            brand: { name: '', pillars: null, platforms: null, offers: null, voice_tone: null, icp: null } }),
-        })
-        const styleData = await res.json()
-        description = styleData.description ?? null
-        style_tags = styleData.style_tags ?? null
-      } catch { /* style analysis optional */ }
+    const { error: uploadErr } = await supabase.storage.from('brand-assets').upload(filePath, file, { contentType: file.type })
+    if (uploadErr) {
+      alert(`Upload failed: ${uploadErr.message}`)
+      setUploadingTemplate(false)
+      return
+    }
 
-      const { data } = await supabase.from('brand_assets').insert({
-        brand_id: brandId, category: 'testimonial_template',
-        name: file.name.replace(/\.[^.]+$/, ''), file_path: filePath, file_url: publicUrl,
-        description, style_tags,
-      }).select('id, name, file_url, file_path, description, style_tags').single()
-      if (data) setTemplates(prev => [data, ...prev])
+    const { data: { publicUrl } } = supabase.storage.from('brand-assets').getPublicUrl(filePath)
+
+    // Analyze visual style for use as DALL-E reference
+    let description: string | null = null
+    let style_tags: string[] | null = null
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [], mode: 'analyze-style', imageDataUrl: dataUrl,
+          brand: { name: '', pillars: null, platforms: null, offers: null, voice_tone: null, icp: null } }),
+      })
+      const styleData = await res.json()
+      description = styleData.description ?? null
+      style_tags = styleData.style_tags ?? null
+    } catch { /* style analysis optional */ }
+
+    const { data, error: dbErr } = await supabase.from('brand_assets').insert({
+      brand_id: brandId, category: 'testimonial_template',
+      name: file.name.replace(/\.[^.]+$/, ''), file_path: filePath, file_url: publicUrl,
+      description, style_tags,
+    }).select('id, name, file_url, file_path, description, style_tags').single()
+
+    if (dbErr) {
+      alert(`Failed to save template: ${dbErr.message}`)
+    } else if (data) {
+      setTemplates(prev => [data, ...prev])
     }
     setUploadingTemplate(false)
   }
 
-  async function generateTestimonialGraphic(t: Testimonial) {
+  function generateTestimonialGraphic(t: Testimonial) {
     if (graphicGenerating) return
     setGraphicGenerating(t.id)
-    try {
-      const styleRefs = templates
-        .filter(tmpl => tmpl.description)
-        .map(tmpl => ({ description: tmpl.description, style_tags: tmpl.style_tags ?? [] }))
-      const res = await fetch('/api/chat', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: [], mode: 'generate-testimonial-graphic',
-          testimonialContent: t.content,
-          testimonialAuthor: t.author_name,
-          testimonialRating: t.rating,
-          styleRefs,
-          brand: { name: brandName, pillars: null, platforms: null, offers: null, voice_tone: null, icp: null },
-        }),
-      })
-      const data = await res.json()
-      if (data.error) throw new Error(data.error)
-      if (data.b64) {
-        setGraphicDataUrls(prev => ({ ...prev, [t.id]: `data:image/png;base64,${data.b64}` }))
+    setTimeout(async () => {
+      try {
+        const primary = brandColors?.primary ?? '#e91e8c'
+        const accent = brandColors?.accent ?? primary
+
+        const dataUrl = buildTestimonialGraphic(t.content, t.author_name, t.author_title, t.rating, brandName, primary, accent)
+
+        // Upload PNG to storage
+        const res = await fetch(dataUrl)
+        const blob = await res.blob()
+        const filePath = `${t.brand_id}/testimonial-graphics/${t.id}.png`
+        const { error: uploadErr } = await supabase.storage.from('brand-assets').upload(filePath, blob, { contentType: 'image/png', upsert: true })
+        if (uploadErr) throw new Error(uploadErr.message)
+
+        const { data: { publicUrl } } = supabase.storage.from('brand-assets').getPublicUrl(filePath)
+
+        // Save URL back to testimonial row
+        await supabase.from('testimonials').update({ graphic_url: publicUrl }).eq('id', t.id)
+
+        // Update local state
+        setTestimonials(prev => prev.map(x => x.id === t.id ? { ...x, graphic_url: publicUrl } : x))
+        setGraphicDataUrls(prev => ({ ...prev, [t.id]: dataUrl }))
+      } catch (err) {
+        console.error('Graphic generation error:', err)
+        alert(`Graphic generation failed: ${err instanceof Error ? err.message : String(err)}`)
       }
-    } catch (err) {
-      console.error('Graphic generation error:', err)
-      alert(`Graphic generation failed: ${err instanceof Error ? err.message : String(err)}`)
-    }
-    setGraphicGenerating(null)
+      setGraphicGenerating(null)
+    }, 50)
   }
 
   async function deleteTemplate(t: Template) {
@@ -448,9 +643,17 @@ export default function TestimonialsPage() {
 
   async function deleteTestimonial(t: Testimonial) {
     if (t.file_path) await supabase.storage.from('brand-assets').remove([t.file_path])
+    if (t.graphic_url) await supabase.storage.from('brand-assets').remove([`${t.brand_id}/testimonial-graphics/${t.id}.png`])
     await supabase.from('testimonials').delete().eq('id', t.id)
     setTestimonials(prev => prev.filter(x => x.id !== t.id))
     setDeleteConfirm(null)
+  }
+
+  async function removeGraphic(t: Testimonial) {
+    await supabase.storage.from('brand-assets').remove([`${t.brand_id}/testimonial-graphics/${t.id}.png`])
+    await supabase.from('testimonials').update({ graphic_url: null }).eq('id', t.id)
+    setTestimonials(prev => prev.map(x => x.id === t.id ? { ...x, graphic_url: null } : x))
+    setGraphicDataUrls(prev => { const n = { ...prev }; delete n[t.id]; return n })
   }
 
   const inputClass = "w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-pink-200 focus:border-[#e91e8c] transition-colors bg-white"
@@ -711,61 +914,41 @@ export default function TestimonialsPage() {
         </div>
       </div>
 
-      {/* List */}
-      <div className="space-y-3">
-        {/* Filter by campaign */}
-        {campaigns.length > 0 && (
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-semibold text-gray-400">Filter:</span>
-            <button
-              onClick={() => setFilterCampaignId('')}
-              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all ${filterCampaignId === '' ? 'text-white border-transparent' : 'border-gray-200 text-gray-500 hover:border-pink-300 hover:text-[#e91e8c]'}`}
-              style={filterCampaignId === '' ? { background: 'linear-gradient(135deg, #e91e8c, #be185d)' } : {}}
-            >
-              All
+      {/* Campaign filter */}
+      {campaigns.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-semibold text-gray-400">Filter:</span>
+          {[{ id: '', name: 'All' }, { id: 'none', name: 'General' }, ...campaigns].map(c => (
+            <button key={c.id} onClick={() => setFilterCampaignId(c.id)}
+              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all ${filterCampaignId === c.id ? 'text-white border-transparent' : 'border-gray-200 text-gray-500 hover:border-pink-300 hover:text-[#e91e8c]'}`}
+              style={filterCampaignId === c.id ? { background: 'linear-gradient(135deg, #e91e8c, #be185d)' } : {}}>
+              {c.name}
             </button>
-            <button
-              onClick={() => setFilterCampaignId('none')}
-              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all ${filterCampaignId === 'none' ? 'text-white border-transparent' : 'border-gray-200 text-gray-500 hover:border-pink-300 hover:text-[#e91e8c]'}`}
-              style={filterCampaignId === 'none' ? { background: 'linear-gradient(135deg, #e91e8c, #be185d)' } : {}}
-            >
-              General
-            </button>
-            {campaigns.map(c => (
-              <button
-                key={c.id}
-                onClick={() => setFilterCampaignId(c.id)}
-                className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all ${filterCampaignId === c.id ? 'text-white border-transparent' : 'border-gray-200 text-gray-500 hover:border-pink-300 hover:text-[#e91e8c]'}`}
-                style={filterCampaignId === c.id ? { background: 'linear-gradient(135deg, #e91e8c, #be185d)' } : {}}
-              >
-                {c.name}
-              </button>
-            ))}
-          </div>
-        )}
-        {(() => {
-          const filtered = filterCampaignId === ''
-            ? testimonials
-            : filterCampaignId === 'none'
-            ? testimonials.filter(t => !t.campaign_id)
-            : testimonials.filter(t => t.campaign_id === filterCampaignId)
-          const count = filtered.length
-          return <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">{count} testimonial{count !== 1 ? 's' : ''}{filterCampaignId && filterCampaignId !== 'none' ? ` · ${campaigns.find(c => c.id === filterCampaignId)?.name ?? ''}` : filterCampaignId === 'none' ? ' · General' : ''}</p>
-        })()}
-        {loading && <p className="text-sm text-gray-400">Loading…</p>}
-        {!loading && testimonials.length === 0 && (
-          <div className="py-16 flex flex-col items-center gap-3 bg-white rounded-2xl border border-gray-100">
-            <svg className="w-10 h-10 text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
-            <p className="text-sm text-gray-400">No testimonials yet</p>
-          </div>
-        )}
+          ))}
+        </div>
+      )}
 
-        {(filterCampaignId === ''
-          ? testimonials
-          : filterCampaignId === 'none'
-          ? testimonials.filter(t => !t.campaign_id)
-          : testimonials.filter(t => t.campaign_id === filterCampaignId)
-        ).map(t => {
+      {loading && <p className="text-sm text-gray-400">Loading…</p>}
+
+      {!loading && testimonials.length === 0 && (
+        <div className="py-16 flex flex-col items-center gap-3 bg-white rounded-2xl border border-gray-100">
+          <svg className="w-10 h-10 text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
+          <p className="text-sm text-gray-400">No testimonials yet</p>
+        </div>
+      )}
+
+      {!loading && (() => {
+        const applyFilter = (list: Testimonial[]) => filterCampaignId === '' ? list
+          : filterCampaignId === 'none' ? list.filter(t => !t.campaign_id)
+          : list.filter(t => t.campaign_id === filterCampaignId)
+
+        const all = applyFilter(testimonials)
+        // Text/PDF without a graphic = needs action
+        const needsGraphic = all.filter(t => (t.source_type === 'text' || t.source_type === 'pdf') && !t.graphic_url)
+        // Has a graphic (canvas-generated) OR is an image testimonial
+        const readyToPost = all.filter(t => t.graphic_url || t.source_type === 'image')
+
+        function TestimonialCard({ t }: { t: Testimonial }) {
           const isExpanded = expandedId === t.id
           const preview = t.content?.slice(0, 220)
           const hasMore = (t.content?.length ?? 0) > 220
@@ -773,9 +956,10 @@ export default function TestimonialsPage() {
             ? Math.floor((Date.now() - new Date(t.last_used_at).getTime()) / 86400000)
             : null
           const isOnCooldown = lastUsedDaysAgo !== null && lastUsedDaysAgo < 90
+          const displayGraphicUrl = graphicDataUrls[t.id] ?? t.graphic_url
 
           return (
-            <div key={t.id} className={`bg-white rounded-2xl border shadow-sm overflow-hidden ${isOnCooldown ? 'border-amber-100' : 'border-gray-100'}`}>
+            <div className={`bg-white rounded-2xl border shadow-sm overflow-hidden ${isOnCooldown ? 'border-amber-100' : 'border-gray-100'}`}>
               <div className="px-5 py-4">
                 <div className="flex items-start gap-3">
                   {t.source_type === 'image' && t.file_url && (
@@ -794,7 +978,6 @@ export default function TestimonialsPage() {
                       <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: SOURCE_COLOR[t.source_type].bg, color: SOURCE_COLOR[t.source_type].color }}>
                         {t.source_type.charAt(0).toUpperCase() + t.source_type.slice(1)}
                       </span>
-                      {/* Campaign tag */}
                       {t.campaign_id && (() => {
                         const camp = campaigns.find(c => c.id === t.campaign_id)
                         return camp ? (
@@ -803,7 +986,6 @@ export default function TestimonialsPage() {
                           </span>
                         ) : null
                       })()}
-                      {/* Usage status */}
                       {isOnCooldown && (
                         <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-600">
                           Used {lastUsedDaysAgo}d ago · cooling down
@@ -831,57 +1013,51 @@ export default function TestimonialsPage() {
                   <button onClick={() => setDeleteConfirm(t.id)} className="text-gray-300 hover:text-red-400 transition-colors shrink-0">✕</button>
                 </div>
               </div>
-              {/* Generate graphic for text/PDF testimonials */}
+
+              {/* Generate / show graphic */}
               {(t.source_type === 'text' || t.source_type === 'pdf') && (
                 <div className="px-5 py-3 border-t border-gray-50 bg-gray-50/40">
-                  {graphicDataUrls[t.id] ? (
+                  {displayGraphicUrl ? (
                     <div className="space-y-2">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={graphicDataUrls[t.id]} alt="Generated graphic" className="w-full rounded-xl border border-gray-100" />
+                      <div className="relative">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={displayGraphicUrl} alt="Quote graphic" className={`w-full rounded-xl border border-gray-100 transition-opacity ${graphicGenerating === t.id ? 'opacity-40' : ''}`} />
+                        {graphicGenerating === t.id && (
+                          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+                            <svg className="w-6 h-6 animate-spin text-[#e91e8c]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/></svg>
+                            <span className="text-xs font-semibold text-[#e91e8c]">Regenerating…</span>
+                          </div>
+                        )}
+                      </div>
                       <div className="flex gap-2 items-center">
-                        <span className="text-[10px] text-gray-400 flex-1">Generated quote card background</span>
-                        <button
-                          onClick={() => generateTestimonialGraphic(t)}
-                          disabled={graphicGenerating === t.id}
-                          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:border-pink-300 hover:text-[#e91e8c] transition-colors disabled:opacity-40"
-                        >
-                          Regen
+                        <button onClick={() => generateTestimonialGraphic(t)} disabled={!!graphicGenerating}
+                          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:border-pink-300 hover:text-[#e91e8c] transition-colors disabled:opacity-40">
+                          {graphicGenerating === t.id ? 'Generating…' : 'Regen'}
                         </button>
-                        <a
-                          href={graphicDataUrls[t.id]}
-                          download={`testimonial-graphic-${t.id}.png`}
-                          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:border-gray-300 hover:bg-gray-50 transition-colors"
-                        >
+                        <a href={displayGraphicUrl} download={`testimonial-${t.id}.png`}
+                          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:border-gray-300 hover:bg-gray-50 transition-colors">
                           Download
                         </a>
+                        <button onClick={() => removeGraphic(t)}
+                          className="ml-auto text-[11px] font-semibold px-2.5 py-1 rounded-lg text-red-400 hover:text-red-600 transition-colors">
+                          Remove graphic
+                        </button>
                       </div>
                     </div>
                   ) : (
-                    <button
-                      onClick={() => generateTestimonialGraphic(t)}
-                      disabled={graphicGenerating === t.id}
+                    <button onClick={() => generateTestimonialGraphic(t)} disabled={!!graphicGenerating}
                       className="flex items-center gap-1.5 text-xs font-semibold transition-colors disabled:opacity-40"
-                      style={{ color: '#e91e8c' }}
-                    >
+                      style={{ color: '#e91e8c' }}>
                       {graphicGenerating === t.id ? (
-                        <>
-                          <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
-                          </svg>
-                          Generating graphic…
-                        </>
+                        <><svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/></svg>Generating…</>
                       ) : (
-                        <>
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>
-                          Generate Quote Graphic
-                          {templates.length > 0 && <span className="font-normal text-[10px] text-gray-400">· uses {templates.length} template{templates.length !== 1 ? 's' : ''}</span>}
-                        </>
+                        <><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>Generate Quote Graphic</>
                       )}
                     </button>
                   )}
                 </div>
               )}
+
               {t.source_type === 'pdf' && t.file_url && (
                 <div className="px-5 py-2 border-t border-gray-50 bg-gray-50/40">
                   <a href={t.file_url} target="_blank" rel="noopener noreferrer" className="text-xs font-medium hover:underline" style={{ color: '#e91e8c' }}>View PDF →</a>
@@ -889,8 +1065,38 @@ export default function TestimonialsPage() {
               )}
             </div>
           )
-        })}
-      </div>
+        }
+
+        return (
+          <div className="space-y-6">
+            {/* ── Section 1: Needs graphic ── */}
+            {needsGraphic.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Awaiting Graphic</span>
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-600">{needsGraphic.length}</span>
+                </div>
+                {needsGraphic.map(t => <TestimonialCard key={t.id} t={t} />)}
+              </div>
+            )}
+
+            {/* ── Section 2: Ready to post ── */}
+            {readyToPost.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Ready to Post</span>
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600">{readyToPost.length}</span>
+                </div>
+                {readyToPost.map(t => <TestimonialCard key={t.id} t={t} />)}
+              </div>
+            )}
+
+            {all.length === 0 && testimonials.length > 0 && (
+              <p className="text-sm text-gray-400 text-center py-4">No testimonials match the selected filter.</p>
+            )}
+          </div>
+        )
+      })()}
 
       {deleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }}>

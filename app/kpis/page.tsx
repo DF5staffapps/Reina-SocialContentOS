@@ -160,11 +160,12 @@ export default function KpisPage() {
     const imp = parseInt(form.impressions) || 0
     const rch = parseInt(form.reach) || 0
     thisWeekEngagement += eng
-    if (post.platform) {
-      if (!platformTotals[post.platform]) platformTotals[post.platform] = { impressions: 0, reach: 0, engagement: 0 }
-      platformTotals[post.platform].impressions += imp
-      platformTotals[post.platform].reach += rch
-      platformTotals[post.platform].engagement += eng
+    const postPlatforms = post.platform ?? []
+    for (const pl of postPlatforms) {
+      if (!platformTotals[pl]) platformTotals[pl] = { impressions: 0, reach: 0, engagement: 0 }
+      platformTotals[pl].impressions += imp
+      platformTotals[pl].reach += rch
+      platformTotals[pl].engagement += eng
     }
     if (post.pillar) {
       pillarTotals[post.pillar] = (pillarTotals[post.pillar] ?? 0) + eng

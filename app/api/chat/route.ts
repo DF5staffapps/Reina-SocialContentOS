@@ -329,11 +329,11 @@ Return ONLY valid JSON.` },
           role: 'user',
           content: [
             { type: 'image_url', image_url: { url: body.imageDataUrl } },
-            { type: 'text', text: `Analyze the visual style of this image for use as a graphic design reference. Return a JSON object with:
-- "description": a 1–2 sentence summary of the overall visual style (e.g. "Dark cinematic photography with high contrast and moody blue tones")
-- "style_tags": an array of 3–6 concise style keywords (e.g. ["cinematic", "dark moody", "high contrast", "blue tones"])
+            { type: 'text', text: `Analyze the LAYOUT and COMPOSITION of this graphic design template. Return a JSON object with:
+- "description": a 1–2 sentence summary of the layout and composition ONLY — describe shapes, element placement, decorative elements, spacing, and structure. Do NOT mention any colors, color names, or tones.
+- "style_tags": an array of 3–6 keywords describing layout style only (e.g. ["centered composition", "speech bubble shape", "corner dot accents", "rounded card", "quote mark motif"]) — absolutely NO color words.
 
-Focus only on visual/aesthetic style: color palette, mood, rendering technique (photo, illustration, 3D, flat design, etc.), lighting, composition style. Do not describe the subject matter.
+Focus ONLY on: layout structure, shape of containers, decorative motifs, element positioning, negative space for text, graphic style (flat, illustrated, minimal, geometric, etc.). Completely ignore color — describe as if the image were black and white.
 
 Return ONLY valid JSON.` },
           ],
@@ -571,17 +571,23 @@ The audience trusts you. Now make the ask:
     const testimonialContent = body.testimonialContent ?? ''
     const testimonialAuthor = body.testimonialAuthor ?? ''
     const styleRefs = body.styleRefs ?? []
+    const brandColors = body.brandColors as { primary?: string; accent?: string } | null | undefined
 
-    const styleContext = styleRefs.length > 0
-      ? `Design style to match: ${styleRefs.map(r => [r.description, ...(r.style_tags ?? [])].filter(Boolean).join(', ')).filter(Boolean).join(' | ')}.`
-      : 'Clean, modern, professional testimonial card design with subtle gradient background.'
+    const layoutContext = styleRefs.length > 0
+      ? `Use this layout and composition style: ${styleRefs.map(r => [r.description, ...(r.style_tags ?? [])].filter(Boolean).join(', ')).filter(Boolean).join(' | ')}.`
+      : 'Clean, modern testimonial card layout with decorative quotation mark motif and empty center area for quote text.'
+
+    const colorOverride = brandColors?.primary
+      ? `IMPORTANT — COLOR OVERRIDE: Regardless of any other style reference, use ONLY these brand colors for every element including background, gradients, shapes, and decorative accents — primary color: ${brandColors.primary}${brandColors.accent ? `, accent color: ${brandColors.accent}` : ''}. Do not use any other colors.`
+      : ''
 
     const prompt = [
       'Professional testimonial quote card background for social media. Square 1:1 format.',
-      styleContext,
-      'Design elements: elegant background (gradient, texture, or solid with decorative accents), decorative quotation mark motif, clear empty center area for the quote text to be overlaid later.',
+      layoutContext,
+      'Design elements: elegant background, decorative accents, clear empty center area for the quote text to be overlaid later.',
       testimonialAuthor ? `The testimonial is from: ${testimonialAuthor}.` : 'For a satisfied customer testimonial.',
       testimonialContent ? `Tone of the testimonial: "${testimonialContent.slice(0, 120)}"` : '',
+      colorOverride,
       'NO text, words, numbers, or typography in the image. High quality, brand-appropriate, Instagram and Facebook ready.',
     ].filter(Boolean).join(' ')
 

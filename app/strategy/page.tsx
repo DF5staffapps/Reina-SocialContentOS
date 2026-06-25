@@ -393,7 +393,7 @@ export default function StrategyPage() {
       concept: post.concept,
       caption: post.caption || null,
       hashtags: post.hashtags || null,
-      status: 'idea',
+      status: 'planning',
     })
     setSavedPostIndices(prev => new Set(prev).add(index))
     setSavingPostIndex(null)
@@ -415,7 +415,7 @@ export default function StrategyPage() {
         concept: p.concept,
         caption: p.caption || null,
         hashtags: p.hashtags || null,
-        status: 'idea',
+        status: 'planning',
       }))
     )
 

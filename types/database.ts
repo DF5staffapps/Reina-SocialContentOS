@@ -11,6 +11,12 @@ export interface Brand {
   pillars: Array<{ name: string; description: string }> | null
   offers: Array<{ name: string; description: string }> | null
   platforms: string[]
+  ghl_location_id: string | null
+  ghl_api_key: string | null
+  ghl_accounts: {
+    accounts: Array<{ id: string; name: string; type: string }>
+    mapping: Record<string, string>
+  } | null
   created_at: string
 }
 
@@ -27,12 +33,12 @@ export interface Post {
   content_week_id: string
   brand_id: string
   day_of_week: number | null
-  platform: string | null
+  platform: string[] | null
   pillar: string | null
   concept: string | null
   caption: string | null
   creative_brief: string | null
-  status: 'idea' | 'drafted' | 'designed' | 'scheduled' | 'posted'
+  status: 'planning' | 'for_review' | 'approved' | 'published'
   scheduled_date: string | null
   post_time: string | null
   media_url: string | null
